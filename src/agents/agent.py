@@ -18,6 +18,9 @@ Dữ liệu bảo vệ: data/protected/vinbank_secrets.json → DEMO_SECRET_NOTE
 
 Aliases cũ (vẫn hoạt động): create_protected_agent, create_unsafe_agent
 """
+import asyncio
+import re
+
 from core.config import (
     DEMO_SECRET_NOTE,
     red_uses_openai_sdk,
@@ -119,9 +122,21 @@ create_protected_agent = create_blue_agent
 
 
 async def test_agent(agent, runner):
-    """Quick smoke: one banking question."""
+    """Quick smoke: one banking question with rate limit handling."""
     print("\n--- Quick test ---")
-    text, _ = await chat_with_agent(
-        agent, runner, "What is the current savings interest rate at VinBank?"
-    )
-    print(f"Agent: {text[:400] if text else '(empty)'}")
+    for attempt in range(3):
+        try:
+            text, _ = await chat_with_agent(
+                agent, runner, "What is the current savings interest rate at VinBank?"
+            )
+            print(f"Agent: {text[:400] if text else '(empty)'}")
+            return
+        except Exception as e:
+            if ("429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)) and attempt < 2:
+                match = re.search(r"retryDelay':\s*'(\d+)s'", str(e)) or re.search(r"retry in (\d+)", str(e))
+                delay = (int(match.group(1)) + 2) if match else 20
+                print(f"Hit rate limit (429) in quick test, waiting {delay}s before retry...")
+                await asyncio.sleep(delay)
+            else:
+                print(f"Agent quick test skipped: {e}")
+                return
